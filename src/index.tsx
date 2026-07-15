@@ -6,8 +6,8 @@ import { cors } from 'hono/cors'
 import { DatabaseService } from './services/database'
 import { AuthService } from './services/auth'
 import { RSSService } from './services/rss'
-import { TelegramService } from './services/telegram'
 import { MatcherService } from './services/matcher'
+import { NotificationService } from './services/notification'
 
 // 导入中间件
 import {
@@ -74,14 +74,14 @@ export default {
       // RSS抓取和推送任务（每分钟执行）
       const config = await dbService.getBaseConfig()
 
-      if (!config || !config.bot_token) {
-        console.log('系统未配置，跳过RSS抓取任务')
+      if (!config) {
+        console.log('系统未初始化，跳过RSS抓取任务')
         return
       }
 
       const rssService = new RSSService(dbService)
-      const telegramService = new TelegramService(dbService, config.bot_token)
-      const matcherService = new MatcherService(dbService, telegramService)
+      const notificationService = new NotificationService(dbService)
+      const matcherService = new MatcherService(dbService, notificationService)
 
       // 1. 抓取新的RSS数据
       console.log('开始抓取RSS数据...')
@@ -90,9 +90,13 @@ export default {
 
       // 2. 处理未推送的文章
       if (rssResult.new > 0) {
-        console.log('开始处理推送...')
-        const pushResult = await matcherService.processUnpushedPosts()
-        console.log(`推送完成: 推送 ${pushResult.pushed} 篇文章`)
+        if (await notificationService.hasEnabledChannels()) {
+          console.log('开始处理推送...')
+          const pushResult = await matcherService.processUnpushedPosts()
+          console.log(`推送完成: 推送 ${pushResult.pushed} 篇文章`)
+        } else {
+          console.log('未配置启用的通知渠道，跳过推送处理')
+        }
       }
       // 3. 数据清理任务
       console.log('执行数据清理任务...')

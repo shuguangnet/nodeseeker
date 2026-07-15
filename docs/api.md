@@ -377,6 +377,140 @@ PUT /api/telegram/push-settings
 }
 ```
 
+## 通知渠道管理
+
+通知渠道接口用于管理 Telegram、Email、Webhook。API 响应中的 token、key、secret、Authorization 等敏感字段会以 `********` 脱敏返回。
+
+### 获取通知渠道列表
+
+```http
+GET /api/notification-channels
+```
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "type": "webhook",
+      "name": "默认 Webhook",
+      "enabled": true,
+      "config": {
+        "url": "https://example.com/webhook",
+        "method": "POST",
+        "headers": {
+          "Authorization": "********"
+        }
+      }
+    }
+  ]
+}
+```
+
+### 创建通知渠道
+
+```http
+POST /api/notification-channels
+```
+
+**Webhook 请求体**:
+```json
+{
+  "type": "webhook",
+  "name": "默认 Webhook",
+  "enabled": true,
+  "config": {
+    "url": "https://example.com/webhook",
+    "method": "POST",
+    "headers": {
+      "Authorization": "Bearer token"
+    },
+    "timeout_ms": 10000
+  }
+}
+```
+
+**Email 请求体**:
+```json
+{
+  "type": "email",
+  "name": "邮件通知",
+  "enabled": true,
+  "config": {
+    "url": "https://api.example.com/send-mail",
+    "to": "user@example.com",
+    "from": "nodeseek@example.com",
+    "subject": "NodeSeek RSS 通知",
+    "headers": {
+      "Authorization": "Bearer token"
+    }
+  }
+}
+```
+
+**Telegram 请求体**:
+```json
+{
+  "type": "telegram",
+  "name": "Telegram",
+  "enabled": true,
+  "config": {
+    "bot_token": "123456:ABC-DEF...",
+    "chat_id": "123456789"
+  }
+}
+```
+
+### 更新通知渠道
+
+```http
+PUT /api/notification-channels/:id
+```
+
+**请求体**:
+```json
+{
+  "name": "备用 Webhook",
+  "enabled": false,
+  "config": {
+    "url": "https://example.com/new-webhook",
+    "headers": {
+      "Authorization": "********"
+    }
+  }
+}
+```
+
+脱敏字段传回 `********` 或空值时，服务端会保留原始敏感配置。
+
+### 删除通知渠道
+
+```http
+DELETE /api/notification-channels/:id
+```
+
+### 测试通知渠道
+
+```http
+POST /api/notification-channels/:id/test
+```
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "message": "Webhook 测试通知发送成功",
+  "data": {
+    "success": true,
+    "channel_id": 1,
+    "channel_type": "webhook",
+    "channel_name": "默认 Webhook"
+  }
+}
+```
+
 ### 获取 Bot 信息和绑定状态
 
 ```http

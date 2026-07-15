@@ -6,13 +6,13 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ljnchn/NodeSeeker.git)
 
-一个基于 Cloudflare Workers 的智能 RSS 监控和 Telegram 推送系统，专门用于监控 NodeSeek 社区的最新动态。
+一个基于 Cloudflare Workers 的智能 RSS 监控和多渠道通知系统，专门用于监控 NodeSeek 社区的最新动态。
 
 ## ✨ 功能特性
 
 - 🔄 **自动 RSS 抓取**：定时抓取 NodeSeek 社区 RSS 数据，确保信息不遗漏。
 - 🎯 **智能关键词匹配**：支持多关键词组合匹配，可按创建者和分类进行精准过滤。
-- 📱 **Telegram Bot 推送**：实时将匹配的文章推送到您的 Telegram，随时随地掌握动态。
+- 📬 **多渠道通知**：支持 Telegram、Email HTTP API、Webhook，将匹配文章发送到不同通知渠道。
 - 🌐 **Web 管理界面**：提供直观的 Web 操作界面，轻松管理订阅规则和系统配置。
 - ⚡ **高性能架构**：基于 Cloudflare Workers 构建，享受全球边缘网络的低延迟和高可用性。
 - 🗄️ **D1 数据库**：使用 Cloudflare 原生 D1 数据库存储数据，稳定可靠。
@@ -25,7 +25,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 - **数据库**：Cloudflare D1 (SQLite)
 - **前端**：原生 HTML/CSS/JavaScript
 - **认证**：JWT (密码使用 BCrypt 加密)
-- **推送**：Telegram Bot API
+- **通知**：Telegram Bot API、Email HTTP API、Webhook
 - **RSS 解析**：rss-parser
 
 ## 🚀 部署指南
@@ -38,7 +38,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 2. 授权 Cloudflare 访问您的 GitHub 仓库。
 3. 按照提示完成部署流程，Cloudflare 将自动为您完成项目创建和配置。
 4. 部署完成后，访问域名，系统会引导您创建一个管理员账户。
-5. 登录后，在「基础设置」页面配置 Telegram Bot Token。
+5. 登录后，在「基础设置」页面配置 Telegram、Email 或 Webhook 通知渠道。
 6. 配置完成后，在「推送设置」页面配置推送规则。
 
 ### 方式二：手动部署
@@ -50,7 +50,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 - [Node.js](https://nodejs.org/) (版本 18 或更高)
 - [pnpm](https://pnpm.io/)
 - [Cloudflare 账户](https://dash.cloudflare.com/sign-up)
-- [Telegram Bot Token](https://core.telegram.org/bots#6-botfather)
+- [Telegram Bot Token](https://core.telegram.org/bots#6-botfather)（可选，仅 Telegram 渠道需要）
 
 #### 2. 配置流程
 
@@ -72,6 +72,12 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
     ```
     该命令会更新您的 `wrangler.toml` 文件，自动绑定数据库。
 
+4.  **执行数据库迁移**
+    ```bash
+    pnpm run db:migrate
+    pnpm run db:migrate:notifications
+    ```
+
 
 5.  **部署到 Cloudflare**
     ```bash
@@ -90,7 +96,24 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 
 首次访问您的 Worker URL，系统会引导您创建一个管理员账户。请设置一个安全的密码，该密码将经过加密后存储。
 
-### 2. Telegram Bot 设置
+### 2. 通知渠道设置
+
+系统支持三类通知渠道：
+
+- **Telegram**：保留 Bot Token、Webhook、命令菜单和 `/start` 绑定能力。
+- **Webhook**：向指定 URL 发送 JSON payload，非 2xx 响应视为失败。
+- **Email**：通过 HTTP 邮件 API 发送 JSON payload，适合接入 Resend、MailChannels 代理或自建邮件服务。
+
+匹配文章发送时，只要至少一个启用渠道发送成功，文章就会标记为已推送；如果所有渠道失败，文章保持未推送，等待下次重试。
+
+#### Webhook / Email 设置
+
+1. 在系统 Web 界面的「基础设置」页面找到「通知渠道」。
+2. 选择 Webhook 或 Email。
+3. 填写 URL、收件人或 Headers JSON。
+4. 点击「保存渠道」，再点击列表中的「测试」验证。
+
+### 3. Telegram Bot 设置
 
 #### 快速设置
 
@@ -112,7 +135,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 
 4.  **推送设置**
     - 在「推送设置」区域，您可以管理消息推送。
-    - **停止/恢复推送**：随时暂停或恢复所有消息推送。
+    - **停止/恢复推送**：随时暂停或恢复所有通知渠道。
     - **只匹配标题**：设置是否仅在文章标题中搜索关键词。
 
 #### Bot 命令

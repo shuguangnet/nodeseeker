@@ -419,7 +419,7 @@ export const DashboardPage: FC = () => {
 
             {/* 基础设置内容 */}
             <div id="config" class="tab-content active" style="padding: 30px;">
-              <h2 style="font-size: 20px; margin-bottom: 30px; color: #333;">🤖 Telegram Bot 设置</h2>
+              <h2 style="font-size: 20px; margin-bottom: 30px; color: #333;">📬 通知渠道设置</h2>
               
               {/* Bot Token 设置区域 */}
               <div style="background: #f8f9fa; padding: 24px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid #2196f3;" class="config-section">
@@ -498,6 +498,64 @@ export const DashboardPage: FC = () => {
                 </div>
               </div>
 
+              {/* 通知渠道管理区域 */}
+              <div style="background: #f8f9fa; padding: 24px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid #00a67d;" class="config-section">
+                <h3 style="font-size: 16px; margin-bottom: 16px; color: #333;">📡 通知渠道</h3>
+
+                <form id="notificationChannelForm" style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px;">
+                  <input type="hidden" id="notificationChannelId" name="notificationChannelId" />
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                    <div>
+                      <label for="notificationChannelType" style="display: block; margin-bottom: 6px; font-weight: 500; color: #333;">类型</label>
+                      <select id="notificationChannelType" name="notificationChannelType" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="webhook">Webhook</option>
+                        <option value="email">Email</option>
+                        <option value="telegram">Telegram</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="notificationChannelName" style="display: block; margin-bottom: 6px; font-weight: 500; color: #333;">名称</label>
+                      <input id="notificationChannelName" name="notificationChannelName" placeholder="例如：默认 Webhook" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-top: 26px;">
+                      <input type="checkbox" id="notificationChannelEnabled" name="notificationChannelEnabled" checked />
+                      启用
+                    </label>
+                  </div>
+
+                  <div class="notification-fields" data-type="webhook">
+                    <label for="webhookUrl" style="display: block; margin-bottom: 6px; font-weight: 500; color: #333;">Webhook URL</label>
+                    <input id="webhookUrl" name="webhookUrl" placeholder="https://example.com/webhook" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px;" />
+                    <label for="webhookHeaders" style="display: block; margin-bottom: 6px; font-weight: 500; color: #333;">Headers JSON</label>
+                    <textarea id="webhookHeaders" name="webhookHeaders" placeholder='{"Authorization":"Bearer token"}' rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                  </div>
+
+                  <div class="notification-fields" data-type="email" style="display: none;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 10px;">
+                      <input id="emailUrl" name="emailUrl" placeholder="邮件 API URL" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                      <input id="emailTo" name="emailTo" placeholder="收件人" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                      <input id="emailFrom" name="emailFrom" placeholder="发件人，可选" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                    </div>
+                    <input id="emailSubject" name="emailSubject" placeholder="邮件标题模板，可选" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px;" />
+                    <textarea id="emailHeaders" name="emailHeaders" placeholder='Headers JSON，例如 {"Authorization":"Bearer token"}' rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                  </div>
+
+                  <div class="notification-fields" data-type="telegram" style="display: none;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                      <input id="telegramChannelToken" name="telegramChannelToken" type="password" placeholder="Bot Token，留空保留原值" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                      <input id="telegramChannelChatId" name="telegramChannelChatId" placeholder="Chat ID，可由 /start 自动绑定" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;" />
+                    </div>
+                  </div>
+
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="submit" style="padding: 10px 18px; background: #00a67d; color: white; border: none; border-radius: 4px; cursor: pointer;">保存渠道</button>
+                    <button type="button" id="cancelNotificationEditBtn" style="padding: 10px 18px; background: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">取消编辑</button>
+                  </div>
+                </form>
+
+                <div id="notificationChannelsList"></div>
+              </div>
+
               {/* 推送设置区域 */}
               <div style="background: #f8f9fa; padding: 24px; border-radius: 8px; border-left: 4px solid #9c27b0;margin-bottom: 30px; min-height: 200px;" class="config-section" id="pushSettingsSection">
                 <h3 style="font-size: 16px; margin-bottom: 16px; color: #333;">📬 推送设置</h3>
@@ -508,7 +566,7 @@ export const DashboardPage: FC = () => {
                       <input type="checkbox" id="stopPush" name="stopPush" style="width: 18px; height: 18px; cursor: pointer; margin: 0;" />
                       <div style="pointer-events: none;">
                         <div style="font-weight: 500; color: #333;">停止推送</div>
-                        <div style="font-size: 12px; color: #666;">勾选后将暂停所有 Telegram 消息推送</div>
+                        <div style="font-size: 12px; color: #666;">勾选后将暂停所有通知渠道推送</div>
                       </div>
                     </label>
                     

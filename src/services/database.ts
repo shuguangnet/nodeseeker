@@ -37,6 +37,27 @@ export interface KeywordSub {
   updated_at?: string;
 }
 
+export type NotificationChannelType = 'telegram' | 'email' | 'webhook';
+
+export interface NotificationChannel {
+  id?: number;
+  type: NotificationChannelType;
+  name: string;
+  enabled: number;
+  config_json: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NotificationDelivery {
+  id?: number;
+  post_id: number;
+  channel_id: number;
+  status: 'success' | 'failed';
+  error?: string | null;
+  sent_at?: string;
+}
+
 export class DatabaseService {
   private queryCache: Map<string, { data: any; timestamp: number; ttl: number }>;
   private readonly CACHE_TTL = 60000; // 1分钟缓存
@@ -81,7 +102,7 @@ export class DatabaseService {
   private async checkTablesExist(): Promise<boolean> {
     try {
       // 检查主要表是否存在
-      const tables = ['base_config', 'posts', 'keywords_sub'];
+      const tables = ['base_config', 'posts', 'keywords_sub', 'notification_channels', 'notification_deliveries'];
       
       for (const table of tables) {
         const result = await this.db.prepare(`
@@ -204,6 +225,51 @@ export class DatabaseService {
 
       await this.db.prepare(`
         CREATE INDEX IF NOT EXISTS idx_keywords_sub_created_at ON keywords_sub(created_at)
+      `).run();
+
+      // 创建通知渠道表
+      await this.db.prepare(`
+        CREATE TABLE IF NOT EXISTS notification_channels (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          name TEXT NOT NULL,
+          enabled INTEGER DEFAULT 1,
+          config_json TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+
+      await this.db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_notification_channels_type ON notification_channels(type)
+      `).run();
+
+      await this.db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_notification_channels_enabled ON notification_channels(enabled)
+      `).run();
+
+      // 创建通知投递记录表
+      await this.db.prepare(`
+        CREATE TABLE IF NOT EXISTS notification_deliveries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          post_id INTEGER NOT NULL,
+          channel_id INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          error TEXT DEFAULT NULL,
+          sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+
+      await this.db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_notification_deliveries_post_id ON notification_deliveries(post_id)
+      `).run();
+
+      await this.db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel_id ON notification_deliveries(channel_id)
+      `).run();
+
+      await this.db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_notification_deliveries_status ON notification_deliveries(status)
       `).run();
 
       console.log('数据库表初始化完成');
@@ -611,6 +677,148 @@ export class DatabaseService {
     return result as KeywordSub | null;
   }
 
+  // 通知渠道相关操作
+  async getAllNotificationChannels(): Promise<NotificationChannel[]> {
+    const result = await this.db.prepare(`
+      SELECT * FROM notification_channels
+      ORDER BY created_at DESC
+    `).all();
+
+    return result.results as unknown as NotificationChannel[];
+  }
+
+  async getEnabledNotificationChannels(): Promise<NotificationChannel[]> {
+    const result = await this.db.prepare(`
+      SELECT * FROM notification_channels
+      WHERE enabled = 1
+      ORDER BY created_at DESC
+    `).all();
+
+    return result.results as unknown as NotificationChannel[];
+  }
+
+  async getNotificationChannelById(id: number): Promise<NotificationChannel | null> {
+    const result = await this.db.prepare(`
+      SELECT * FROM notification_channels
+      WHERE id = ?
+    `).bind(id).first();
+
+    return result as NotificationChannel | null;
+  }
+
+  async getNotificationChannelByType(type: NotificationChannelType): Promise<NotificationChannel | null> {
+    const result = await this.db.prepare(`
+      SELECT * FROM notification_channels
+      WHERE type = ?
+      ORDER BY id ASC
+      LIMIT 1
+    `).bind(type).first();
+
+    return result as NotificationChannel | null;
+  }
+
+  async createNotificationChannel(channel: Omit<NotificationChannel, 'id' | 'created_at' | 'updated_at'>): Promise<NotificationChannel> {
+    const result = await this.db.prepare(`
+      INSERT INTO notification_channels (type, name, enabled, config_json)
+      VALUES (?, ?, ?, ?)
+      RETURNING *
+    `).bind(
+      channel.type,
+      channel.name,
+      channel.enabled,
+      channel.config_json
+    ).first();
+
+    return result as unknown as NotificationChannel;
+  }
+
+  async updateNotificationChannel(id: number, channel: Partial<Omit<NotificationChannel, 'id' | 'created_at' | 'updated_at'>>): Promise<NotificationChannel | null> {
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (channel.type !== undefined) {
+      updates.push('type = ?');
+      values.push(channel.type);
+    }
+    if (channel.name !== undefined) {
+      updates.push('name = ?');
+      values.push(channel.name);
+    }
+    if (channel.enabled !== undefined) {
+      updates.push('enabled = ?');
+      values.push(channel.enabled);
+    }
+    if (channel.config_json !== undefined) {
+      updates.push('config_json = ?');
+      values.push(channel.config_json);
+    }
+
+    if (updates.length === 0) {
+      return this.getNotificationChannelById(id);
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
+    const result = await this.db.prepare(`
+      UPDATE notification_channels
+      SET ${updates.join(', ')}
+      WHERE id = ?
+      RETURNING *
+    `).bind(...values).first();
+
+    return result as NotificationChannel | null;
+  }
+
+  async deleteNotificationChannel(id: number): Promise<boolean> {
+    const result = await this.db.prepare(`
+      DELETE FROM notification_channels
+      WHERE id = ?
+    `).bind(id).run();
+
+    return result.meta.changes > 0;
+  }
+
+  async upsertNotificationChannelByType(
+    type: NotificationChannelType,
+    channel: Omit<NotificationChannel, 'id' | 'type' | 'created_at' | 'updated_at'>
+  ): Promise<NotificationChannel> {
+    const existing = await this.getNotificationChannelByType(type);
+    if (existing?.id) {
+      const updated = await this.updateNotificationChannel(existing.id, {
+        name: channel.name,
+        enabled: channel.enabled,
+        config_json: channel.config_json
+      });
+      return updated as NotificationChannel;
+    }
+
+    return this.createNotificationChannel({
+      type,
+      name: channel.name,
+      enabled: channel.enabled,
+      config_json: channel.config_json
+    });
+  }
+
+  async createNotificationDelivery(delivery: Omit<NotificationDelivery, 'id' | 'sent_at'>): Promise<NotificationDelivery> {
+    const result = await this.db.prepare(`
+      INSERT INTO notification_deliveries (post_id, channel_id, status, error)
+      VALUES (?, ?, ?, ?)
+      RETURNING *
+    `).bind(
+      delivery.post_id,
+      delivery.channel_id,
+      delivery.status,
+      delivery.error || null
+    ).first();
+
+    this.clearCacheByPattern('getTodayMessagesCount');
+    this.clearCacheByPattern('Stats');
+
+    return result as unknown as NotificationDelivery;
+  }
+
   // 数据库初始化检查
   async isInitialized(): Promise<boolean> {
     try {
@@ -681,8 +889,8 @@ export class DatabaseService {
     const cached = this.getFromCache<number>(cacheKey);
     if (cached !== null) return cached;
     const result = await this.db.prepare(`
-      SELECT COUNT(*) as count FROM posts 
-      WHERE push_status = 1 AND push_date >= datetime('now', '-24 hours')
+      SELECT COUNT(*) as count FROM notification_deliveries
+      WHERE status = 'success' AND sent_at >= datetime('now', '-24 hours')
     `).first();
     const count = (result as any)?.count || 0;
     this.setCache(cacheKey, count, 60000); // 1分钟缓存

@@ -334,6 +334,15 @@ export class TelegramService {
       bound_user_username: username
     });
 
+    await this.dbService.upsertNotificationChannelByType('telegram', {
+      name: 'Telegram',
+      enabled: 1,
+      config_json: JSON.stringify({
+        bot_token: this.botToken,
+        chat_id: chatId.toString()
+      })
+    });
+
     const userInfo = userFullName || '未知用户';
     const welcomeText = `
 🎉 **欢迎使用 NodeSeek RSS 监控机器人！**
@@ -581,9 +590,20 @@ ${userBindingStatus}
     // 解除绑定
     await this.dbService.updateBaseConfig({ 
       chat_id: '', 
-      bound_user_name: undefined, 
-      bound_user_username: undefined 
+      bound_user_name: '', 
+      bound_user_username: '' 
     });
+
+    const telegramChannel = await this.dbService.getNotificationChannelByType('telegram');
+    if (telegramChannel?.id) {
+      const channelConfig = JSON.parse(telegramChannel.config_json || '{}');
+      await this.dbService.updateNotificationChannel(telegramChannel.id, {
+        config_json: JSON.stringify({
+          ...channelConfig,
+          chat_id: ''
+        })
+      });
+    }
     
     await ctx.reply('✅ **绑定已解除**\n\n您将不再接收推送消息。如需重新绑定，请发送 /start 命令。', { parse_mode: 'Markdown' });
   }

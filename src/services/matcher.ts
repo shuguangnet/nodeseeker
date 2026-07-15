@@ -1,5 +1,5 @@
 import { DatabaseService, Post, KeywordSub, BaseConfig } from './database';
-import { TelegramService } from './telegram';
+import { NotificationService } from './notification';
 
 export interface MatchResult {
   matched: boolean;
@@ -30,7 +30,7 @@ export interface PushResult {
 export class MatcherService {
   constructor(
     private dbService: DatabaseService,
-    private telegramService: TelegramService
+    private notificationService: NotificationService
   ) {}
 
   /**
@@ -311,18 +311,25 @@ export class MatcherService {
           continue;
         }
 
-        const pushSuccess = await this.telegramService.pushPost(post, firstMatch.subscription);
+        const notificationResult = await this.notificationService.sendPost(post, firstMatch.subscription);
+        const pushSuccess = notificationResult.success;
         
         if (pushSuccess) {
+          await this.dbService.updatePostPushStatus(
+            post.post_id,
+            1,
+            firstMatch.subscription.id,
+            new Date().toISOString()
+          );
+
           result.pushed++;
           result.details.push({
             postId: post.post_id,
             title: post.title,
-            status: 'pushed'
+            status: 'pushed',
+            reason: `成功 ${notificationResult.successCount}/${notificationResult.total} 个通知渠道`
           });
           console.log(`成功推送文章: ${post.title}`);
-          
-          // 注意：pushPost 方法内部已经更新了状态，这里不需要再次更新
         } else {
           // 推送失败，收集到批量更新中（保持未推送状态，下次再试）
           result.errors++;
@@ -330,7 +337,7 @@ export class MatcherService {
             postId: post.post_id,
             title: post.title,
             status: 'error',
-            reason: '推送失败'
+            reason: notificationResult.total === 0 ? '没有启用的通知渠道' : '所有通知渠道发送失败'
           });
           console.error(`推送文章失败: ${post.title}`);
         }
@@ -434,17 +441,25 @@ export class MatcherService {
         };
       }
 
-      const pushSuccess = await this.telegramService.pushPost(post, subscription);
+      const notificationResult = await this.notificationService.sendPost(post, subscription);
+      const pushSuccess = notificationResult.success;
 
       if (pushSuccess) {
+        await this.dbService.updatePostPushStatus(
+          post.post_id,
+          1,
+          subscription.id,
+          new Date().toISOString()
+        );
+
         return {
           success: true,
-          message: '推送成功'
+          message: `推送成功，成功 ${notificationResult.successCount}/${notificationResult.total} 个通知渠道`
         };
       } else {
         return {
           success: false,
-          message: '推送失败'
+          message: notificationResult.total === 0 ? '没有启用的通知渠道' : '推送失败'
         };
       }
     } catch (error) {

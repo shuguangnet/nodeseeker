@@ -8,7 +8,8 @@
     "deploy": "pnpm run build && wrangler deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "db:create": "wrangler d1 create nodeseeker-db",
-    "db:migrate": "wrangler d1 execute nodeseeker-db --file=./migrations/0001_initial.sql"
+    "db:migrate": "wrangler d1 execute nodeseeker-db --file=./migrations/0001_initial.sql",
+    "db:migrate:notifications": "wrangler d1 execute nodeseeker-db --file=./migrations/0002_notification_channels.sql"
   },
   "dependencies": {
     "grammy": "^1.30.0",

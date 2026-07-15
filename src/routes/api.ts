@@ -5,6 +5,8 @@ import { AuthService } from '../services/auth'
 import { RSSService } from '../services/rss'
 import { TelegramService } from '../services/telegram'
 import { MatcherService } from '../services/matcher'
+import { NotificationService } from '../services/notification'
+import { NotificationChannel, NotificationChannelType } from '../services/database'
 import { performanceMonitor, withPerformanceMonitoring } from '../services/performance'
 
 type Bindings = {
@@ -48,6 +50,73 @@ const jwtMiddleware = async (c: any, next: any) => {
 
 // 应用JWT中间件到所有API路由
 apiRoutes.use('*', jwtMiddleware)
+
+const MASKED_SECRET = '********'
+const notificationChannelTypes = ['telegram', 'email', 'webhook']
+
+function isNotificationChannelType(type: unknown): type is NotificationChannelType {
+  return typeof type === 'string' && notificationChannelTypes.includes(type)
+}
+
+function parseChannelConfig(configJson: string): Record<string, any> {
+  try {
+    return JSON.parse(configJson || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function isSensitiveKey(key: string): boolean {
+  const lowerKey = key.toLowerCase()
+  return lowerKey.includes('token') ||
+    lowerKey.includes('secret') ||
+    lowerKey.includes('password') ||
+    lowerKey.includes('key') ||
+    lowerKey === 'authorization'
+}
+
+function sanitizeConfig(config: Record<string, any>): Record<string, any> {
+  const sanitized: Record<string, any> = Array.isArray(config) ? [] : {}
+
+  for (const [key, value] of Object.entries(config)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      sanitized[key] = sanitizeConfig(value)
+      continue
+    }
+
+    sanitized[key] = isSensitiveKey(key) && value ? MASKED_SECRET : value
+  }
+
+  return sanitized
+}
+
+function mergeSensitiveConfig(existing: Record<string, any>, incoming: Record<string, any>): Record<string, any> {
+  const merged: Record<string, any> = { ...existing }
+
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      merged[key] = mergeSensitiveConfig(existing[key] || {}, value)
+      continue
+    }
+
+    if (isSensitiveKey(key) && (value === MASKED_SECRET || value === '' || value === undefined || value === null)) {
+      continue
+    }
+
+    merged[key] = value
+  }
+
+  return merged
+}
+
+function toSafeNotificationChannel(channel: NotificationChannel) {
+  return {
+    ...channel,
+    enabled: channel.enabled === 1,
+    config: sanitizeConfig(parseChannelConfig(channel.config_json)),
+    config_json: undefined
+  }
+}
 
 // 获取基础配置
 apiRoutes.get('/config', async (c) => {
@@ -169,6 +238,15 @@ apiRoutes.post('/telegram/setup-bot', async (c) => {
         message: '保存 Bot Token 失败'
       }, 500)
     }
+
+    await dbService.upsertNotificationChannelByType('telegram', {
+      name: 'Telegram',
+      enabled: 1,
+      config_json: JSON.stringify({
+        bot_token,
+        chat_id: config.chat_id || ''
+      })
+    })
     
     endTimer(1, false);
     return c.json({
@@ -230,6 +308,203 @@ apiRoutes.put('/telegram/push-settings', async (c) => {
     return c.json({
       success: false,
       message: `更新推送设置失败: ${error}`
+    }, 500)
+  }
+})
+
+// 获取通知渠道列表
+apiRoutes.get('/notification-channels', async (c) => {
+  try {
+    const dbService = c.get('dbService')
+    const channels = await dbService.getAllNotificationChannels()
+
+    return c.json({
+      success: true,
+      data: channels.map(toSafeNotificationChannel)
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: `获取通知渠道失败: ${error}`
+    }, 500)
+  }
+})
+
+// 创建通知渠道
+apiRoutes.post('/notification-channels', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { type, name, enabled = true, config = {} } = body
+
+    if (!isNotificationChannelType(type)) {
+      return c.json({
+        success: false,
+        message: '通知渠道类型无效'
+      }, 400)
+    }
+
+    if (!name || !String(name).trim()) {
+      return c.json({
+        success: false,
+        message: '请填写通知渠道名称'
+      }, 400)
+    }
+
+    const dbService = c.get('dbService')
+    const channel = await dbService.createNotificationChannel({
+      type,
+      name: String(name).trim(),
+      enabled: enabled ? 1 : 0,
+      config_json: JSON.stringify(config || {})
+    })
+
+    return c.json({
+      success: true,
+      message: '通知渠道创建成功',
+      data: toSafeNotificationChannel(channel)
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: `创建通知渠道失败: ${error}`
+    }, 500)
+  }
+})
+
+// 更新通知渠道
+apiRoutes.put('/notification-channels/:id', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) {
+      return c.json({
+        success: false,
+        message: '无效的通知渠道 ID'
+      }, 400)
+    }
+
+    const body = await c.req.json()
+    const dbService = c.get('dbService')
+    const existing = await dbService.getNotificationChannelById(id)
+
+    if (!existing) {
+      return c.json({
+        success: false,
+        message: '通知渠道不存在'
+      }, 404)
+    }
+
+    const updates: Partial<NotificationChannel> = {}
+
+    if (body.type !== undefined) {
+      if (!isNotificationChannelType(body.type)) {
+        return c.json({
+          success: false,
+          message: '通知渠道类型无效'
+        }, 400)
+      }
+      updates.type = body.type
+    }
+
+    if (body.name !== undefined) {
+      if (!String(body.name).trim()) {
+        return c.json({
+          success: false,
+          message: '请填写通知渠道名称'
+        }, 400)
+      }
+      updates.name = String(body.name).trim()
+    }
+
+    if (body.enabled !== undefined) {
+      updates.enabled = body.enabled ? 1 : 0
+    }
+
+    if (body.config !== undefined) {
+      const mergedConfig = mergeSensitiveConfig(parseChannelConfig(existing.config_json), body.config || {})
+      updates.config_json = JSON.stringify(mergedConfig)
+    }
+
+    const channel = await dbService.updateNotificationChannel(id, updates)
+
+    return c.json({
+      success: true,
+      message: '通知渠道更新成功',
+      data: channel ? toSafeNotificationChannel(channel) : null
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: `更新通知渠道失败: ${error}`
+    }, 500)
+  }
+})
+
+// 删除通知渠道
+apiRoutes.delete('/notification-channels/:id', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) {
+      return c.json({
+        success: false,
+        message: '无效的通知渠道 ID'
+      }, 400)
+    }
+
+    const dbService = c.get('dbService')
+    const success = await dbService.deleteNotificationChannel(id)
+
+    if (!success) {
+      return c.json({
+        success: false,
+        message: '通知渠道不存在'
+      }, 404)
+    }
+
+    return c.json({
+      success: true,
+      message: '通知渠道删除成功'
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: `删除通知渠道失败: ${error}`
+    }, 500)
+  }
+})
+
+// 测试通知渠道
+apiRoutes.post('/notification-channels/:id/test', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) {
+      return c.json({
+        success: false,
+        message: '无效的通知渠道 ID'
+      }, 400)
+    }
+
+    const dbService = c.get('dbService')
+    const channel = await dbService.getNotificationChannelById(id)
+
+    if (!channel) {
+      return c.json({
+        success: false,
+        message: '通知渠道不存在'
+      }, 404)
+    }
+
+    const notificationService = new NotificationService(dbService)
+    const result = await notificationService.testChannel(channel)
+
+    return c.json({
+      success: result.success,
+      message: result.message,
+      data: result
+    }, result.success ? 200 : 400)
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: `测试通知渠道失败: ${error}`
     }, 500)
   }
 })
@@ -470,8 +745,8 @@ apiRoutes.post('/telegram/unbind', async (c) => {
     // 清除绑定信息
     const updatedConfig = await dbService.updateBaseConfig({
       chat_id: '',
-      bound_user_name: undefined,
-      bound_user_username: undefined
+      bound_user_name: '',
+      bound_user_username: ''
     })
     
     if (!updatedConfig) {
@@ -479,6 +754,17 @@ apiRoutes.post('/telegram/unbind', async (c) => {
         success: false,
         message: '解除绑定失败'
       }, 500)
+    }
+
+    const telegramChannel = await dbService.getNotificationChannelByType('telegram')
+    if (telegramChannel?.id) {
+      const channelConfig = parseChannelConfig(telegramChannel.config_json)
+      await dbService.updateNotificationChannel(telegramChannel.id, {
+        config_json: JSON.stringify({
+          ...channelConfig,
+          chat_id: ''
+        })
+      })
     }
     
     return c.json({
@@ -696,15 +982,15 @@ apiRoutes.get('/stats', async (c) => {
     const dbService = c.get('dbService')
     const config = await dbService.getBaseConfig()
     
-    if (!config || !config.bot_token) {
+    if (!config) {
       return c.json({
         success: false,
-        message: '请先配置Bot Token'
+        message: '系统未初始化'
       }, 400)
     }
     
-    const telegramService = new TelegramService(dbService, config.bot_token)
-    const matcherService = new MatcherService(dbService, telegramService)
+    const notificationService = new NotificationService(dbService)
+    const matcherService = new MatcherService(dbService, notificationService)
     
     const stats = await matcherService.getMatchStats()
     

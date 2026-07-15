@@ -4,6 +4,7 @@ let authToken = '';
 let currentConfig = {};
 let botInfo = null;
 let userInfo = null;
+let notificationChannels = [];
 
 // 文章列表相关变量
 let currentPage = 1;
@@ -99,6 +100,11 @@ function initEventListeners() {
 
     // Bot Token 设置表单
     document.getElementById('botTokenForm').addEventListener('submit', handleBotTokenSubmit);
+
+    // 通知渠道管理
+    document.getElementById('notificationChannelForm').addEventListener('submit', handleNotificationChannelSubmit);
+    document.getElementById('notificationChannelType').addEventListener('change', updateNotificationChannelFields);
+    document.getElementById('cancelNotificationEditBtn').addEventListener('click', resetNotificationChannelForm);
     
     // 推送设置表单
     document.getElementById('pushSettingsForm').addEventListener('submit', handlePushSettingsSubmit);
@@ -176,6 +182,7 @@ function switchTab(tabName) {
 async function loadInitialData() {
     await loadConfig();
     await loadBotInfo();
+    await loadNotificationChannels();
     await updateStatus();
 }
 
@@ -342,6 +349,8 @@ async function updateStatus() {
                 activeSubscriptions.textContent = subscriptionsResponse.data.length;
             }
         }
+
+        await loadNotificationChannels(false);
         
         // 更新今日推送数量
         const statsResponse = await apiRequest('/api/stats/today', 'GET');
@@ -357,6 +366,250 @@ async function updateStatus() {
         
     } catch (error) {
         console.error('更新状态失败:', error);
+    }
+}
+
+// 加载通知渠道
+async function loadNotificationChannels(showError = true) {
+    try {
+        const response = await apiRequest('/api/notification-channels', 'GET');
+        if (response.success) {
+            notificationChannels = response.data || [];
+            renderNotificationChannels(notificationChannels);
+        } else if (showError) {
+            showMessage(response.message || '加载通知渠道失败', 'error');
+        }
+    } catch (error) {
+        console.error('加载通知渠道失败:', error);
+        if (showError) {
+            showMessage(error.message || '加载通知渠道失败', 'error');
+        }
+    }
+}
+
+function updateNotificationChannelFields() {
+    const type = document.getElementById('notificationChannelType').value;
+    document.querySelectorAll('.notification-fields').forEach(section => {
+        section.style.display = section.dataset.type === type ? 'block' : 'none';
+    });
+}
+
+function getJsonFromTextarea(id) {
+    const value = document.getElementById(id).value.trim();
+    if (!value) return {};
+
+    try {
+        return JSON.parse(value);
+    } catch (error) {
+        throw new Error('Headers JSON 格式无效');
+    }
+}
+
+function buildNotificationChannelPayload() {
+    const type = document.getElementById('notificationChannelType').value;
+    const name = document.getElementById('notificationChannelName').value.trim();
+    const enabled = document.getElementById('notificationChannelEnabled').checked;
+    let config = {};
+
+    if (!name) {
+        throw new Error('请填写通知渠道名称');
+    }
+
+    if (type === 'webhook') {
+        config = {
+            url: document.getElementById('webhookUrl').value.trim(),
+            method: 'POST',
+            headers: getJsonFromTextarea('webhookHeaders'),
+            timeout_ms: 10000
+        };
+        if (!config.url) {
+            throw new Error('请填写 Webhook URL');
+        }
+    } else if (type === 'email') {
+        config = {
+            url: document.getElementById('emailUrl').value.trim(),
+            method: 'POST',
+            headers: getJsonFromTextarea('emailHeaders'),
+            to: document.getElementById('emailTo').value.trim(),
+            from: document.getElementById('emailFrom').value.trim(),
+            subject: document.getElementById('emailSubject').value.trim(),
+            timeout_ms: 10000
+        };
+        if (!config.url || !config.to) {
+            throw new Error('请填写邮件 API URL 和收件人');
+        }
+    } else if (type === 'telegram') {
+        config = {
+            bot_token: document.getElementById('telegramChannelToken').value.trim(),
+            chat_id: document.getElementById('telegramChannelChatId').value.trim()
+        };
+        if (!config.bot_token && !document.getElementById('notificationChannelId').value) {
+            throw new Error('请填写 Telegram Bot Token');
+        }
+    }
+
+    return { type, name, enabled, config };
+}
+
+async function handleNotificationChannelSubmit(e) {
+    e.preventDefault();
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<span class="btn-icon">⏳</span>保存中...';
+    submitBtn.disabled = true;
+
+    try {
+        const channelId = document.getElementById('notificationChannelId').value;
+        const payload = buildNotificationChannelPayload();
+        const response = channelId
+            ? await apiRequest(`/api/notification-channels/${channelId}`, 'PUT', payload)
+            : await apiRequest('/api/notification-channels', 'POST', payload);
+
+        if (response.success) {
+            showMessage(response.message || '通知渠道已保存', 'success');
+            resetNotificationChannelForm();
+            await loadNotificationChannels();
+        } else {
+            showMessage(response.message || '通知渠道保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('保存通知渠道失败:', error);
+        showMessage(error.message || '保存通知渠道失败', 'error');
+    } finally {
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+    }
+}
+
+function renderNotificationChannels(channels) {
+    const container = document.getElementById('notificationChannelsList');
+    if (!container) return;
+
+    if (!channels.length) {
+        container.innerHTML = `
+            <div class="empty-state" style="background: white; padding: 16px; border-radius: 6px;">
+                <h3>暂无通知渠道</h3>
+                <p>添加 Webhook、Email 或 Telegram 渠道后即可发送匹配通知</p>
+            </div>
+        `;
+        return;
+    }
+
+    const typeMap = {
+        telegram: 'Telegram',
+        email: 'Email',
+        webhook: 'Webhook'
+    };
+
+    container.innerHTML = channels.map(channel => {
+        const enabledText = channel.enabled ? '已启用' : '已禁用';
+        const enabledColor = channel.enabled ? '#10b981' : '#6b7280';
+        return `
+            <div class="subscription-item">
+                <div class="subscription-header">
+                    <h4 class="subscription-title">${channel.name} <span style="font-size: 12px; color: #666;">${typeMap[channel.type] || channel.type}</span></h4>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="subscription-delete-btn" style="background: #2196f3;" onclick="editNotificationChannel(${channel.id})">编辑</button>
+                        <button class="subscription-delete-btn" style="background: #00a67d;" onclick="testNotificationChannel(${channel.id})">测试</button>
+                        <button class="subscription-delete-btn" style="background: #6b7280;" onclick="toggleNotificationChannel(${channel.id})">${channel.enabled ? '禁用' : '启用'}</button>
+                        <button class="subscription-delete-btn" onclick="deleteNotificationChannel(${channel.id})">删除</button>
+                    </div>
+                </div>
+                <div class="filters">
+                    <span style="color: ${enabledColor}; font-weight: 500;">${enabledText}</span>
+                    ${renderNotificationChannelSummary(channel)}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderNotificationChannelSummary(channel) {
+    const config = channel.config || {};
+    if (channel.type === 'telegram') {
+        return `<span>Chat ID: ${config.chat_id || '未绑定'}</span>`;
+    }
+    if (channel.type === 'email') {
+        return `<span>收件人: ${config.to || '-'}</span><span> API: ${config.url || '-'}</span>`;
+    }
+    return `<span>URL: ${config.url || '-'}</span>`;
+}
+
+function editNotificationChannel(id) {
+    const channel = notificationChannels.find(item => item.id === id);
+    if (!channel) return;
+
+    const config = channel.config || {};
+    document.getElementById('notificationChannelId').value = channel.id;
+    document.getElementById('notificationChannelType').value = channel.type;
+    document.getElementById('notificationChannelName').value = channel.name;
+    document.getElementById('notificationChannelEnabled').checked = !!channel.enabled;
+    updateNotificationChannelFields();
+
+    document.getElementById('webhookUrl').value = config.url || '';
+    document.getElementById('webhookHeaders').value = config.headers ? JSON.stringify(config.headers, null, 2) : '';
+    document.getElementById('emailUrl').value = config.url || '';
+    document.getElementById('emailTo').value = config.to || '';
+    document.getElementById('emailFrom').value = config.from || '';
+    document.getElementById('emailSubject').value = config.subject || '';
+    document.getElementById('emailHeaders').value = config.headers ? JSON.stringify(config.headers, null, 2) : '';
+    document.getElementById('telegramChannelToken').value = config.bot_token || '';
+    document.getElementById('telegramChannelChatId').value = config.chat_id || '';
+    document.getElementById('cancelNotificationEditBtn').style.display = 'inline-block';
+}
+
+function resetNotificationChannelForm() {
+    document.getElementById('notificationChannelForm').reset();
+    document.getElementById('notificationChannelId').value = '';
+    document.getElementById('notificationChannelEnabled').checked = true;
+    document.getElementById('notificationChannelType').value = 'webhook';
+    document.getElementById('cancelNotificationEditBtn').style.display = 'none';
+    updateNotificationChannelFields();
+}
+
+async function testNotificationChannel(id) {
+    try {
+        const response = await apiRequest(`/api/notification-channels/${id}/test`, 'POST');
+        showMessage(response.message || '通知渠道测试成功', response.success ? 'success' : 'error');
+    } catch (error) {
+        console.error('测试通知渠道失败:', error);
+        showMessage(error.message || '测试通知渠道失败', 'error');
+    }
+}
+
+async function toggleNotificationChannel(id) {
+    const channel = notificationChannels.find(item => item.id === id);
+    if (!channel) return;
+
+    try {
+        const response = await apiRequest(`/api/notification-channels/${id}`, 'PUT', {
+            enabled: !channel.enabled
+        });
+        if (response.success) {
+            showMessage(response.message || '通知渠道状态已更新', 'success');
+            await loadNotificationChannels();
+        }
+    } catch (error) {
+        console.error('更新通知渠道状态失败:', error);
+        showMessage(error.message || '更新通知渠道状态失败', 'error');
+    }
+}
+
+async function deleteNotificationChannel(id) {
+    if (!confirm('确定要删除这个通知渠道吗？')) {
+        return;
+    }
+
+    try {
+        const response = await apiRequest(`/api/notification-channels/${id}`, 'DELETE');
+        if (response.success) {
+            showMessage(response.message || '通知渠道已删除', 'success');
+            await loadNotificationChannels();
+        }
+    } catch (error) {
+        console.error('删除通知渠道失败:', error);
+        showMessage(error.message || '删除通知渠道失败', 'error');
     }
 }
 
@@ -537,12 +790,13 @@ async function apiRequest(url, method = 'GET', data = null) {
     }
 
     const response = await fetch(url, options);
-    
+    const result = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(result.message || `HTTP error! status: ${response.status}`);
     }
-    
-    return await response.json();
+
+    return result;
 }
 
 // 显示消息
