@@ -42,6 +42,7 @@ interface HttpChannelConfig {
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
+const DINGTALK_KEYWORD = '备份';
 
 export class NotificationService {
   constructor(private dbService: DatabaseService) {}
@@ -397,10 +398,11 @@ async function sendJsonRequest(config: HttpChannelConfig, payload: Record<string
 
 function formatWebhookPayload(url: string, payload: Record<string, any>): Record<string, any> {
   if (isDingTalkWebhook(url)) {
+    const content = payload.message || JSON.stringify(payload);
     return {
       msgtype: 'text',
       text: {
-        content: payload.message || JSON.stringify(payload)
+        content: `${content}\n\n关键词: ${DINGTALK_KEYWORD}`
       }
     };
   }
