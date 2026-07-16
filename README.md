@@ -102,6 +102,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 
 - **Telegram**：保留 Bot Token、Webhook、命令菜单和 `/start` 绑定能力。
 - **Webhook**：向指定 URL 发送 JSON payload，非 2xx 响应视为失败。
+- **钉钉 Webhook**：自动识别钉钉机器人地址并发送 `text` 消息；如果钉钉返回 `errcode/errmsg`，测试结果会直接显示错误。
 - **Email**：通过 HTTP 邮件 API 发送 JSON payload，适合接入 Resend、MailChannels 代理或自建邮件服务。
 - **SMTP**：通过随仓库提供的 Docker SMTP Relay 转换为 HTTP Email API，见 [SMTP Relay 文档](docs/smtp-relay.md)。
 

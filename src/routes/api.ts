@@ -495,10 +495,11 @@ apiRoutes.post('/notification-channels/:id/test', async (c) => {
 
     const notificationService = new NotificationService(dbService)
     const result = await notificationService.testChannel(channel)
+    const message = result.success ? result.message : [result.message, result.error].filter(Boolean).join(': ')
 
     return c.json({
       success: result.success,
-      message: result.message,
+      message,
       data: result
     }, result.success ? 200 : 400)
   } catch (error) {

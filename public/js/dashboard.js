@@ -511,7 +511,7 @@ function renderNotificationChannels(channels) {
                     <h4 class="subscription-title">${channel.name} <span style="font-size: 12px; color: #666;">${typeMap[channel.type] || channel.type}</span></h4>
                     <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                         <button class="subscription-delete-btn" style="background: #2196f3;" onclick="editNotificationChannel(${channel.id})">编辑</button>
-                        <button class="subscription-delete-btn" style="background: #00a67d;" onclick="testNotificationChannel(${channel.id})">测试</button>
+                        <button id="testChannelBtn-${channel.id}" class="subscription-delete-btn" style="background: #00a67d;" onclick="testNotificationChannel(${channel.id})">测试</button>
                         <button class="subscription-delete-btn" style="background: #6b7280;" onclick="toggleNotificationChannel(${channel.id})">${channel.enabled ? '禁用' : '启用'}</button>
                         <button class="subscription-delete-btn" onclick="deleteNotificationChannel(${channel.id})">删除</button>
                     </div>
@@ -520,6 +520,7 @@ function renderNotificationChannels(channels) {
                     <span style="color: ${enabledColor}; font-weight: 500;">${enabledText}</span>
                     ${renderNotificationChannelSummary(channel)}
                 </div>
+                <div id="notificationTestResult-${channel.id}" style="display: none; margin-top: 8px; padding: 8px 10px; border-radius: 4px; font-size: 12px;"></div>
             </div>
         `;
     }).join('');
@@ -569,13 +570,54 @@ function resetNotificationChannelForm() {
 }
 
 async function testNotificationChannel(id) {
+    const btn = document.getElementById(`testChannelBtn-${id}`);
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.innerHTML = '测试中...';
+        btn.disabled = true;
+    }
+    setNotificationTestResult(id, '', 'info', false);
+
     try {
         const response = await apiRequest(`/api/notification-channels/${id}/test`, 'POST');
-        showMessage(response.message || '通知渠道测试成功', response.success ? 'success' : 'error');
+        const message = response.message || '通知渠道测试成功';
+        showMessage(message, 'success', 8000);
+        setNotificationTestResult(id, message, 'success');
     } catch (error) {
         console.error('测试通知渠道失败:', error);
-        showMessage(error.message || '测试通知渠道失败', 'error');
+        const message = error.message || '测试通知渠道失败';
+        showMessage(message, 'error', 12000);
+        setNotificationTestResult(id, message, 'error');
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
+}
+
+function setNotificationTestResult(id, message, type = 'info', visible = true) {
+    const resultEl = document.getElementById(`notificationTestResult-${id}`);
+    if (!resultEl) return;
+
+    if (!visible) {
+        resultEl.style.display = 'none';
+        resultEl.textContent = '';
+        return;
+    }
+
+    const styles = {
+        success: { background: '#e8f5e8', color: '#166534', border: '#bbf7d0' },
+        error: { background: '#fee2e2', color: '#991b1b', border: '#fecaca' },
+        info: { background: '#e3f2fd', color: '#1976d2', border: '#bfdbfe' }
+    };
+    const style = styles[type] || styles.info;
+
+    resultEl.textContent = message;
+    resultEl.style.background = style.background;
+    resultEl.style.color = style.color;
+    resultEl.style.border = `1px solid ${style.border}`;
+    resultEl.style.display = 'block';
 }
 
 async function toggleNotificationChannel(id) {
@@ -793,7 +835,9 @@ async function apiRequest(url, method = 'GET', data = null) {
     const result = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
+        const detail = result?.data?.error || result?.error;
+        const message = [result.message, detail].filter(Boolean).join(': ');
+        throw new Error(message || `HTTP error! status: ${response.status}`);
     }
 
     return result;

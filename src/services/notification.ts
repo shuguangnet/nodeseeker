@@ -268,21 +268,25 @@ class WebhookNotificationProvider implements NotificationProvider {
   constructor(private config: HttpChannelConfig) {}
 
   async send(post: Post, matchedSub: KeywordSub): Promise<NotificationSendResult> {
-    return sendJsonRequest(this.config, {
+    const payload = {
       event: 'nodeseek.post.matched',
       post,
       subscription: matchedSub,
       message: formatPlainMessage(post, matchedSub),
       post_url: getPostUrl(post)
-    }, 'Webhook 通知发送成功');
+    };
+
+    return sendJsonRequest(this.config, formatWebhookPayload(this.config.url || '', payload), 'Webhook 通知发送成功');
   }
 
   async test(): Promise<NotificationSendResult> {
-    return sendJsonRequest(this.config, {
+    const payload = {
       event: 'nodeseek.notification.test',
       message: 'NodeSeek RSS Webhook 测试通知',
       sent_at: new Date().toISOString()
-    }, 'Webhook 测试通知发送成功');
+    };
+
+    return sendJsonRequest(this.config, formatWebhookPayload(this.config.url || '', payload), 'Webhook 测试通知发送成功');
   }
 }
 
@@ -356,12 +360,23 @@ async function sendJsonRequest(config: HttpChannelConfig, payload: Record<string
       signal: controller.signal
     });
 
+    const responseText = await response.text().catch(() => '');
+    const responseJson = tryParseJson(responseText);
+    const providerError = getProviderError(responseJson);
+
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
       return {
         success: false,
         message: `请求失败: HTTP ${response.status}`,
-        error: errorText.slice(0, 500)
+        error: (providerError || responseText).slice(0, 500)
+      };
+    }
+
+    if (providerError) {
+      return {
+        success: false,
+        message: 'Webhook 服务返回失败',
+        error: providerError.slice(0, 500)
       };
     }
 
@@ -378,6 +393,60 @@ async function sendJsonRequest(config: HttpChannelConfig, payload: Record<string
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function formatWebhookPayload(url: string, payload: Record<string, any>): Record<string, any> {
+  if (isDingTalkWebhook(url)) {
+    return {
+      msgtype: 'text',
+      text: {
+        content: payload.message || JSON.stringify(payload)
+      }
+    };
+  }
+
+  return payload;
+}
+
+function isDingTalkWebhook(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.hostname === 'oapi.dingtalk.com' && parsedUrl.pathname.includes('/robot/send');
+  } catch {
+    return false;
+  }
+}
+
+function tryParseJson(value: string): Record<string, any> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function getProviderError(responseJson: Record<string, any> | null): string | null {
+  if (!responseJson) {
+    return null;
+  }
+
+  if (typeof responseJson.errcode === 'number' && responseJson.errcode !== 0) {
+    return responseJson.errmsg ? `DingTalk errcode ${responseJson.errcode}: ${responseJson.errmsg}` : `DingTalk errcode ${responseJson.errcode}`;
+  }
+
+  if (responseJson.ok === false) {
+    return responseJson.message || responseJson.error || 'Webhook 返回 ok=false';
+  }
+
+  if (responseJson.success === false) {
+    return responseJson.message || responseJson.error || 'Webhook 返回 success=false';
+  }
+
+  return null;
 }
 
 function formatMarkdownMessage(post: Post, matchedSub: KeywordSub): string {

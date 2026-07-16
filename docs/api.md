@@ -432,6 +432,8 @@ POST /api/notification-channels
 }
 ```
 
+钉钉机器人 Webhook 会自动识别 `https://oapi.dingtalk.com/robot/send?...`，并转换为钉钉要求的 `msgtype=text` payload。钉钉返回 HTTP 200 但 `errcode != 0` 时会被视为失败，测试接口会返回钉钉的 `errmsg`。
+
 **Email 请求体**:
 ```json
 {
