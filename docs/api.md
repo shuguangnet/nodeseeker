@@ -450,6 +450,8 @@ POST /api/notification-channels
 }
 ```
 
+如果使用 SMTP，请先运行仓库内的 Docker SMTP Relay，再将 `config.url` 指向 Relay 的 `/send-mail` 接口。详见 `docs/smtp-relay.md`。
+
 **Telegram 请求体**:
 ```json
 {

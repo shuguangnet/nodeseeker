@@ -103,6 +103,7 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 - **Telegram**：保留 Bot Token、Webhook、命令菜单和 `/start` 绑定能力。
 - **Webhook**：向指定 URL 发送 JSON payload，非 2xx 响应视为失败。
 - **Email**：通过 HTTP 邮件 API 发送 JSON payload，适合接入 Resend、MailChannels 代理或自建邮件服务。
+- **SMTP**：通过随仓库提供的 Docker SMTP Relay 转换为 HTTP Email API，见 [SMTP Relay 文档](docs/smtp-relay.md)。
 
 匹配文章发送时，只要至少一个启用渠道发送成功，文章就会标记为已推送；如果所有渠道失败，文章保持未推送，等待下次重试。
 
@@ -112,6 +113,18 @@ Docker 版本请移步 ➡️ [NodeSeeker-docker](https://github.com/ljnchn/Node
 2. 选择 Webhook 或 Email。
 3. 填写 URL、收件人或 Headers JSON。
 4. 点击「保存渠道」，再点击列表中的「测试」验证。
+
+如果你只有 SMTP，可以在本机或服务器运行 Docker Relay：
+
+```bash
+docker compose -f docker-compose.smtp-relay.yml up -d --build
+```
+
+然后把 Email 渠道的「邮件 API URL」配置为：
+
+```text
+http://你的服务器IP:8080/send-mail
+```
 
 ### 3. Telegram Bot 设置
 

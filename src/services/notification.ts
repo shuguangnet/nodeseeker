@@ -47,12 +47,12 @@ export class NotificationService {
   constructor(private dbService: DatabaseService) {}
 
   async hasEnabledChannels(): Promise<boolean> {
-    const channels = await this.dbService.getEnabledNotificationChannels();
+    const channels = await this.getDispatchChannels();
     return channels.length > 0;
   }
 
   async sendPost(post: Post, matchedSub: KeywordSub): Promise<NotificationPostResult> {
-    const channels = await this.dbService.getEnabledNotificationChannels();
+    const channels = await this.getDispatchChannels();
     const results: NotificationChannelSendResult[] = [];
 
     if (channels.length === 0) {
@@ -89,6 +89,52 @@ export class NotificationService {
       failureCount,
       results
     };
+  }
+
+  private async getDispatchChannels(): Promise<NotificationChannel[]> {
+    await this.syncLegacyTelegramChannel();
+    return this.dbService.getEnabledNotificationChannels();
+  }
+
+  private async syncLegacyTelegramChannel(): Promise<void> {
+    const [baseConfig, telegramChannel] = await Promise.all([
+      this.dbService.getBaseConfig(),
+      this.dbService.getNotificationChannelByType('telegram')
+    ]);
+
+    if (!baseConfig?.bot_token || !baseConfig.chat_id) {
+      return;
+    }
+
+    if (!telegramChannel) {
+      await this.dbService.createNotificationChannel({
+        type: 'telegram',
+        name: 'Telegram',
+        enabled: 1,
+        config_json: JSON.stringify({
+          bot_token: baseConfig.bot_token,
+          chat_id: baseConfig.chat_id
+        })
+      });
+      return;
+    }
+
+    if (telegramChannel.enabled !== 1) {
+      return;
+    }
+
+    const channelConfig = parseConfig(telegramChannel.config_json);
+    if (channelConfig.bot_token && channelConfig.chat_id) {
+      return;
+    }
+
+    await this.dbService.updateNotificationChannel(telegramChannel.id as number, {
+      config_json: JSON.stringify({
+        ...channelConfig,
+        bot_token: channelConfig.bot_token || baseConfig.bot_token,
+        chat_id: channelConfig.chat_id || baseConfig.chat_id
+      })
+    });
   }
 
   async testChannel(channel: NotificationChannel): Promise<NotificationChannelSendResult> {
@@ -278,6 +324,21 @@ async function sendJsonRequest(config: HttpChannelConfig, payload: Record<string
     return {
       success: false,
       message: '通知渠道 URL 未配置'
+    };
+  }
+
+  try {
+    const url = new URL(config.url);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return {
+        success: false,
+        message: '通知渠道 URL 仅支持 http 或 https'
+      };
+    }
+  } catch {
+    return {
+      success: false,
+      message: '通知渠道 URL 格式无效'
     };
   }
 
